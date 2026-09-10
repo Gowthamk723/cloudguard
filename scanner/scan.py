@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+import boto3
 
 load_dotenv()
 
@@ -16,10 +17,12 @@ def get_s3_client(endpoint_url: str = LOCALSTACK_ENDPOINT):
     )
 
 
-def check_bucket_encryption(s3_client, bucket_name: str) -> bool:
+def check_bucket_uses_kms(s3_client, bucket_name: str) -> bool:
     try:
-        s3_client.get_bucket_encryption(Bucket=bucket_name)
-        return True
+        response = s3_client.get_bucket_encryption(Bucket=bucket_name)
+        rules = response["ServerSideEncryptionConfiguration"]["Rules"]
+        algorithm = rules[0]["ApplyServerSideEncryptionByDefault"]["SSEAlgorithm"]
+        return algorithm == "aws:kms"
     except s3_client.exceptions.ClientError:
         return False
 
@@ -30,8 +33,8 @@ def scan_all_buckets(s3_client):
 
     for bucket in response["Buckets"]:
         name = bucket["Name"]
-        is_encrypted = check_bucket_encryption(s3_client, name)
-        findings.append({"bucket": name, "encrypted": is_encrypted})
+        uses_kms = check_bucket_uses_kms(s3_client, name)
+        findings.append({"bucket": name, "uses_kms": uses_kms})
 
     return findings
 
@@ -39,10 +42,10 @@ def scan_all_buckets(s3_client):
 def print_findings(findings):
     print(f"Scanning {len(findings)} bucket(s)...\n")
     for f in findings:
-        if f["encrypted"]:
-            print(f"[OK]      {f['bucket']} — default encryption enabled")
+        if f["uses_kms"]:
+            print(f"[OK]      {f['bucket']} — using KMS encryption")
         else:
-            print(f"[FINDING] {f['bucket']} — NO default encryption (misconfiguration)")
+            print(f"[FINDING] {f['bucket']} — using AWS-managed keys, not KMS (misconfiguration)")
 
 
 if __name__ == "__main__":
