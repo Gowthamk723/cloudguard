@@ -1,7 +1,7 @@
 import boto3
 from moto import mock_aws
 from scanner.scan import check_bucket_uses_kms, scan_all_buckets
-
+from unittest.mock import patch
 
 @mock_aws
 def test_sse_s3_bucket_is_flagged():
@@ -125,3 +125,27 @@ def test_auto_remediate_false_only_detects():
         "ApplyServerSideEncryptionByDefault"
     ]["SSEAlgorithm"]
     assert algorithm == "AES256"
+
+@mock_aws
+def test_remediation_failure_does_not_crash_scan():
+    """If remediate_bucket_encryption raises an exception, the scan
+    should catch it, record the failure, and still return results
+    for that bucket instead of crashing entirely."""
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="bucket-remediation-fails")
+    client.put_bucket_encryption(
+        Bucket="bucket-remediation-fails",
+        ServerSideEncryptionConfiguration={
+            "Rules": [{"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+        },
+    )
+
+    with patch(
+        "scanner.scan.remediate_bucket_encryption",
+        side_effect=Exception("simulated AWS failure"),
+    ):
+        findings = scan_all_buckets(client, auto_remediate=True)
+
+    result = findings[0]
+    assert result["remediated"] is False
+    assert result["remediation_error"] == "simulated AWS failure"
