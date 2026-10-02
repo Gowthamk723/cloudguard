@@ -2,6 +2,8 @@ import boto3
 from moto import mock_aws
 from scanner.scan import check_bucket_uses_kms, scan_all_buckets
 from unittest.mock import patch
+import json
+from scanner.scan import check_role_has_wildcard_policy, scan_all_roles
 
 @mock_aws
 def test_sse_s3_bucket_is_flagged():
@@ -149,3 +151,84 @@ def test_remediation_failure_does_not_crash_scan():
     result = findings[0]
     assert result["remediated"] is False
     assert result["remediation_error"] == "simulated AWS failure"
+
+
+@mock_aws
+def test_wildcard_policy_is_flagged():
+    client = boto3.client("iam", region_name="us-east-1")
+    client.create_role(
+        RoleName="role-with-wildcard",
+        AssumeRolePolicyDocument=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        }),
+    )
+    client.put_role_policy(
+        RoleName="role-with-wildcard",
+        PolicyName="wildcard-policy",
+        PolicyDocument=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]
+        }),
+    )
+
+    result = check_role_has_wildcard_policy(client, "role-with-wildcard")
+
+    assert result is True
+
+
+@mock_aws
+def test_scoped_policy_is_not_flagged():
+    """Negative case — proves we don't false-positive on a normal,
+    properly-scoped policy. Critical for a security tool's credibility."""
+    client = boto3.client("iam", region_name="us-east-1")
+    client.create_role(
+        RoleName="role-with-scoped-policy",
+        AssumeRolePolicyDocument=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        }),
+    )
+    client.put_role_policy(
+        RoleName="role-with-scoped-policy",
+        PolicyName="scoped-policy",
+        PolicyDocument=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::my-specific-bucket/*"}]
+        }),
+    )
+
+    result = check_role_has_wildcard_policy(client, "role-with-scoped-policy")
+
+    assert result is False
+
+
+@mock_aws
+def test_scan_all_roles_distinguishes_wildcard_from_scoped():
+    client = boto3.client("iam", region_name="us-east-1")
+
+    for role_name, action, resource in [
+        ("bad-role", "*", "*"),
+        ("good-role", "s3:GetObject", "arn:aws:s3:::my-bucket/*"),
+    ]:
+        client.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=json.dumps({
+                "Version": "2012-10-17",
+                "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+            }),
+        )
+        client.put_role_policy(
+            RoleName=role_name,
+            PolicyName="policy",
+            PolicyDocument=json.dumps({
+                "Version": "2012-10-17",
+                "Statement": [{"Effect": "Allow", "Action": action, "Resource": resource}]
+            }),
+        )
+
+    findings = scan_all_roles(client)
+    results = {f["role"]: f["has_wildcard_policy"] for f in findings}
+
+    assert results["bad-role"] is True
+    assert results["good-role"] is False

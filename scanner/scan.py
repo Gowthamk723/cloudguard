@@ -67,9 +67,45 @@ def remediate_bucket_encryption(s3_client, bucket_name: str) -> None:
         },
     )
 
+def get_iam_client(endpoint_url: str = LOCALSTACK_ENDPOINT):
+    return boto3.client(
+        "iam",
+        endpoint_url=endpoint_url,
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        region_name="us-east-1",
+    )
+
+def check_role_has_wildcard_policy(iam_client, role_name: str) -> bool:
+    policy_names = iam_client.list_role_policies(RoleName=role_name)["PolicyNames"]
+
+    for policy_name in policy_names:
+        policy = iam_client.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+        statements = policy["PolicyDocument"]["Statement"]
+
+        if not isinstance(statements, list):
+            statements = [statements]
+
+        for statement in statements:
+            action = statement.get("Action")
+            resource = statement.get("Resource")
+            if action == "*" and resource == "*":
+                return True
+
+    return False
+
+def scan_all_roles(iam_client):
+    findings = []
+    response = iam_client.list_roles()
+
+    for role in response["Roles"]:
+        name = role["RoleName"]
+        has_wildcard = check_role_has_wildcard_policy(iam_client, name)
+        findings.append({"role": name, "has_wildcard_policy": has_wildcard})
+
+    return findings
+
 def get_mongo_collection():
-    """Factory, same dependency-injection pattern as get_s3_client —
-    keeps MongoDB access swappable/testable, not hardcoded inline."""
     uri = os.getenv("MONGODB_URI")
     client = MongoClient(uri)
     db = client["cloudguard"]
@@ -77,26 +113,39 @@ def get_mongo_collection():
 
 
 def log_incident(collection, finding: dict) -> None:
-    """Writes a single scan result as an incident document."""
-    incident = {
-        "bucket": finding["bucket"],
-        "rule": "s3_kms_encryption",
-        "uses_kms_before": finding["uses_kms_before"],
-        "remediated": finding["remediated"],
-        "remediation_error": finding.get("remediation_error"),
-        "status": (
+    """Writes a single scan result as an incident document.
+    Handles both S3 bucket findings and IAM role findings —
+    they have different shapes, so the resource identifier and
+    rule name are derived based on which keys are present."""
+
+    if "bucket" in finding:
+        resource_id = finding["bucket"]
+        rule = "s3_kms_encryption"
+        status = (
             "fixed" if finding["remediated"] else
             "error" if finding.get("remediation_error") else
-            "compliant" if finding["uses_kms_before"] else 
+            "compliant" if finding["uses_kms_before"] else
             "flagged"
-        ),
+        )
+    elif "role" in finding:
+        resource_id = finding["role"]
+        rule = "iam_wildcard_policy"
+        status = "flagged" if finding["has_wildcard_policy"] else "compliant"
+    else:
+        raise ValueError(f"Unknown finding shape: {finding}")
+
+    incident = {
+        "resource": resource_id,
+        "rule": rule,
+        "status": status,
+        "raw_finding": finding,
         "timestamp": datetime.now(timezone.utc),
     }
 
     try:
         collection.insert_one(incident)
     except Exception as e:
-        print(f"[ERROR] Failed to log incident for {finding['bucket']}: {e}")
+        print(f"[ERROR] Failed to log incident for {resource_id}: {e}")
 
 def print_findings(findings):
     print(f"Scanning {len(findings)} bucket(s)...\n")
@@ -111,13 +160,27 @@ def print_findings(findings):
             print(f"[FINDING]   {f['bucket']} — using AWS-managed keys, not KMS (not remediated)")
 
 
+def print_role_findings(findings):
+    print(f"\nScanning {len(findings)} IAM role(s)...\n")
+    for f in findings:
+        if f["has_wildcard_policy"]:
+            print(f"[FINDING]   {f['role']} — has wildcard (Action:*, Resource:*) policy, flagged for review")
+        else:
+            print(f"[OK]        {f['role']} — policies properly scoped")
+
+
 if __name__ == "__main__":
-    client = get_s3_client()
+    s3_client = get_s3_client()
+    iam_client = get_iam_client()
     mongo_collection = get_mongo_collection()
 
-    results = scan_all_buckets(client, auto_remediate=False)
+    bucket_results = scan_all_buckets(s3_client, auto_remediate=True)
+    role_results = scan_all_roles(iam_client)
 
-    for finding in results:
+    all_results = bucket_results + role_results
+
+    for finding in all_results:
         log_incident(mongo_collection, finding)
 
-    print_findings(results)
+    print_findings(bucket_results)
+    print_role_findings(role_results)

@@ -5,15 +5,10 @@ from scanner.scan import get_mongo_collection, log_incident
 
 @pytest.fixture
 def collection():
-    """Real connection to your actual Atlas cluster — not mocked.
-    Requires MONGODB_URI to be set in .env, same as scan.py uses."""
     return get_mongo_collection()
 
 
 def test_log_incident_writes_all_status_types(collection):
-    """Exercises every branch of log_incident's status logic against
-    the REAL database — proves the write actually succeeds and the
-    document shape is correct for each of the 4 possible outcomes."""
 
     test_findings = [
         {"bucket": "test-compliant-bucket", "uses_kms_before": True, "remediated": False, "remediation_error": None},
