@@ -1,13 +1,19 @@
 import boto3
 from moto import mock_aws
-from scanner.scan import check_bucket_uses_kms, scan_all_buckets
 from unittest.mock import patch
 import json
-from scanner.scan import check_role_has_wildcard_policy, scan_all_roles
+from scanner.scan import (
+    check_bucket_uses_kms,
+    scan_all_buckets,
+    check_role_has_wildcard_policy,
+    scan_all_roles,
+    check_bucket_has_required_tag,
+    scan_all_buckets_for_tags,
+)
 
 @mock_aws
 def test_sse_s3_bucket_is_flagged():
-    """A bucket explicitly configured with AES256 should fail."""
+    
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="test-bucket-sse-s3")
     
@@ -27,7 +33,7 @@ def test_sse_s3_bucket_is_flagged():
 
 @mock_aws
 def test_kms_bucket_is_not_flagged():
-    """A bucket explicitly configured with KMS should pass."""
+    
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="test-bucket-kms")
     client.put_bucket_encryption(
@@ -46,8 +52,7 @@ def test_kms_bucket_is_not_flagged():
 
 @mock_aws
 def test_scan_all_buckets_distinguishes_kms_from_sse_s3():
-    """Mixed scenario — proves the scan correctly separates both cases
-    in a single pass, not just in isolation."""
+    
     client = boto3.client("s3", region_name="us-east-1")
 
     client.create_bucket(Bucket="bucket-sse-s3")
@@ -74,8 +79,7 @@ def test_scan_all_buckets_distinguishes_kms_from_sse_s3():
 
 @mock_aws
 def test_non_kms_bucket_gets_remediated():
-    """The core Week 3 behavior: a non-compliant bucket should be
-    fixed automatically when auto_remediate=True."""
+    
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="bucket-to-fix")
     client.put_bucket_encryption(
@@ -87,13 +91,12 @@ def test_non_kms_bucket_gets_remediated():
 
     findings = scan_all_buckets(client, auto_remediate=True)
 
-    # Check what the function reported...
+
     result = findings[0]
     assert result["uses_kms_before"] is False
     assert result["remediated"] is True
 
-    # ...AND independently verify the actual AWS state changed,
-    # not just that our function claims it did.
+
     response = client.get_bucket_encryption(Bucket="bucket-to-fix")
     algorithm = response["ServerSideEncryptionConfiguration"]["Rules"][0][
         "ApplyServerSideEncryptionByDefault"
@@ -103,9 +106,7 @@ def test_non_kms_bucket_gets_remediated():
 
 @mock_aws
 def test_auto_remediate_false_only_detects():
-    """When auto_remediate=False, a non-compliant bucket should be
-    flagged but NOT actually fixed — detection and remediation must
-    stay independently controllable."""
+    
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="bucket-detect-only")
     client.put_bucket_encryption(
@@ -121,7 +122,6 @@ def test_auto_remediate_false_only_detects():
     assert result["uses_kms_before"] is False
     assert result["remediated"] is False
 
-    # Verify the bucket was genuinely left untouched
     response = client.get_bucket_encryption(Bucket="bucket-detect-only")
     algorithm = response["ServerSideEncryptionConfiguration"]["Rules"][0][
         "ApplyServerSideEncryptionByDefault"
@@ -130,9 +130,7 @@ def test_auto_remediate_false_only_detects():
 
 @mock_aws
 def test_remediation_failure_does_not_crash_scan():
-    """If remediate_bucket_encryption raises an exception, the scan
-    should catch it, record the failure, and still return results
-    for that bucket instead of crashing entirely."""
+    
     client = boto3.client("s3", region_name="us-east-1")
     client.create_bucket(Bucket="bucket-remediation-fails")
     client.put_bucket_encryption(
@@ -179,8 +177,7 @@ def test_wildcard_policy_is_flagged():
 
 @mock_aws
 def test_scoped_policy_is_not_flagged():
-    """Negative case — proves we don't false-positive on a normal,
-    properly-scoped policy. Critical for a security tool's credibility."""
+    
     client = boto3.client("iam", region_name="us-east-1")
     client.create_role(
         RoleName="role-with-scoped-policy",
@@ -232,3 +229,41 @@ def test_scan_all_roles_distinguishes_wildcard_from_scoped():
 
     assert results["bad-role"] is True
     assert results["good-role"] is False
+
+@mock_aws
+def test_bucket_without_tag_is_flagged():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="untagged-bucket")
+
+    result = check_bucket_has_required_tag(client, "untagged-bucket")
+
+    assert result is False
+
+@mock_aws
+def test_bucket_with_required_tag_is_not_flagged():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="tagged-bucket")
+    client.put_bucket_tagging(
+        Bucket="tagged-bucket",
+        Tagging={"TagSet": [{"Key": "Environment", "Value": "production"}]},
+    )
+
+    result = check_bucket_has_required_tag(client, "tagged-bucket")
+
+    assert result is True
+
+@mock_aws
+def test_scan_all_buckets_for_tags_distinguishes_tagged_from_untagged():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="bucket-no-tag")
+    client.create_bucket(Bucket="bucket-with-tag")
+    client.put_bucket_tagging(
+        Bucket="bucket-with-tag",
+        Tagging={"TagSet": [{"Key": "Environment", "Value": "staging"}]},
+    )
+
+    findings = scan_all_buckets_for_tags(client)
+    results = {f["bucket_for_tagging"]: f["has_required_tag"] for f in findings}
+
+    assert results["bucket-no-tag"] is False
+    assert results["bucket-with-tag"] is True

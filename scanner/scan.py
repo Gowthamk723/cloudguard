@@ -113,11 +113,6 @@ def get_mongo_collection():
 
 
 def log_incident(collection, finding: dict) -> None:
-    """Writes a single scan result as an incident document.
-    Handles both S3 bucket findings and IAM role findings —
-    they have different shapes, so the resource identifier and
-    rule name are derived based on which keys are present."""
-
     if "bucket" in finding:
         resource_id = finding["bucket"]
         rule = "s3_kms_encryption"
@@ -131,6 +126,10 @@ def log_incident(collection, finding: dict) -> None:
         resource_id = finding["role"]
         rule = "iam_wildcard_policy"
         status = "flagged" if finding["has_wildcard_policy"] else "compliant"
+    elif "bucket_for_tagging" in finding:
+        resource_id = finding["bucket_for_tagging"]
+        rule = "s3_required_tag"
+        status = "compliant" if finding["has_required_tag"] else "flagged"
     else:
         raise ValueError(f"Unknown finding shape: {finding}")
 
@@ -168,6 +167,35 @@ def print_role_findings(findings):
         else:
             print(f"[OK]        {f['role']} — policies properly scoped")
 
+def check_bucket_has_required_tag(s3_client, bucket_name: str, required_tag: str = "Environment") -> bool:
+    
+    try:
+        response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+        tag_keys = [tag["Key"] for tag in response["TagSet"]]
+        return required_tag in tag_keys
+    except s3_client.exceptions.ClientError:
+        return False
+
+def scan_all_buckets_for_tags(s3_client, required_tag: str = "Environment"):
+    
+    findings = []
+    response = s3_client.list_buckets()
+
+    for bucket in response["Buckets"]:
+        name = bucket["Name"]
+        has_tag = check_bucket_has_required_tag(s3_client, name, required_tag)
+        findings.append({"bucket_for_tagging": name, "has_required_tag": has_tag})
+
+    return findings
+
+def print_tag_findings(findings):
+    print(f"\nScanning {len(findings)} bucket(s) for required tags...\n")
+    for f in findings:
+        if f["has_required_tag"]:
+            print(f"[OK]        {f['bucket_for_tagging']} — has required 'Environment' tag")
+        else:
+            print(f"[FINDING]   {f['bucket_for_tagging']} — missing required 'Environment' tag")
+
 
 if __name__ == "__main__":
     s3_client = get_s3_client()
@@ -176,11 +204,13 @@ if __name__ == "__main__":
 
     bucket_results = scan_all_buckets(s3_client, auto_remediate=True)
     role_results = scan_all_roles(iam_client)
+    tag_results = scan_all_buckets_for_tags(s3_client)
 
-    all_results = bucket_results + role_results
+    all_results = bucket_results + role_results + tag_results
 
     for finding in all_results:
         log_incident(mongo_collection, finding)
 
     print_findings(bucket_results)
     print_role_findings(role_results)
+    print_tag_findings(tag_results)
