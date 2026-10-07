@@ -1,12 +1,23 @@
 import os
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 import boto3
-from datetime import datetime, timezone
 from pymongo import MongoClient
+import requests
 
 load_dotenv()
 
 LOCALSTACK_ENDPOINT = os.getenv("LOCALSTACK_ENDPOINT")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+RULE_SEVERITY = {
+    "s3_kms_encryption": "HIGH",
+    "iam_wildcard_policy": "HIGH",
+    "s3_required_tag": "LOW",
+}
+
+SEVERITY_EMOJI = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡", "FIXED": "✅"}
+SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "FIXED": 3}
 
 
 def get_s3_client(endpoint_url: str = LOCALSTACK_ENDPOINT):
@@ -19,6 +30,23 @@ def get_s3_client(endpoint_url: str = LOCALSTACK_ENDPOINT):
     )
 
 
+def get_iam_client(endpoint_url: str = LOCALSTACK_ENDPOINT):
+    return boto3.client(
+        "iam",
+        endpoint_url=endpoint_url,
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        region_name="us-east-1",
+    )
+
+
+def get_mongo_collection():
+    uri = os.getenv("MONGODB_URI")
+    client = MongoClient(uri)
+    db = client["cloudguard"]
+    return db["incidents"]
+
+
 def check_bucket_uses_kms(s3_client, bucket_name: str) -> bool:
     try:
         response = s3_client.get_bucket_encryption(Bucket=bucket_name)
@@ -27,6 +55,17 @@ def check_bucket_uses_kms(s3_client, bucket_name: str) -> bool:
         return algorithm == "aws:kms"
     except s3_client.exceptions.ClientError:
         return False
+
+
+def remediate_bucket_encryption(s3_client, bucket_name: str) -> None:
+    s3_client.put_bucket_encryption(
+        Bucket=bucket_name,
+        ServerSideEncryptionConfiguration={
+            "Rules": [
+                {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "aws:kms"}}
+            ]
+        },
+    )
 
 
 def scan_all_buckets(s3_client, auto_remediate: bool = True):
@@ -57,24 +96,6 @@ def scan_all_buckets(s3_client, auto_remediate: bool = True):
 
     return findings
 
-def remediate_bucket_encryption(s3_client, bucket_name: str) -> None:
-    s3_client.put_bucket_encryption(
-        Bucket=bucket_name,
-        ServerSideEncryptionConfiguration={
-            "Rules": [
-                {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "aws:kms"}}
-            ]
-        },
-    )
-
-def get_iam_client(endpoint_url: str = LOCALSTACK_ENDPOINT):
-    return boto3.client(
-        "iam",
-        endpoint_url=endpoint_url,
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-        region_name="us-east-1",
-    )
 
 def check_role_has_wildcard_policy(iam_client, role_name: str) -> bool:
     policy_names = iam_client.list_role_policies(RoleName=role_name)["PolicyNames"]
@@ -94,6 +115,7 @@ def check_role_has_wildcard_policy(iam_client, role_name: str) -> bool:
 
     return False
 
+
 def scan_all_roles(iam_client):
     findings = []
     response = iam_client.list_roles()
@@ -105,14 +127,29 @@ def scan_all_roles(iam_client):
 
     return findings
 
-def get_mongo_collection():
-    uri = os.getenv("MONGODB_URI")
-    client = MongoClient(uri)
-    db = client["cloudguard"]
-    return db["incidents"]
+
+def check_bucket_has_required_tag(s3_client, bucket_name: str, required_tag: str = "Environment") -> bool:
+    try:
+        response = s3_client.get_bucket_tagging(Bucket=bucket_name)
+        tag_keys = [tag["Key"] for tag in response["TagSet"]]
+        return required_tag in tag_keys
+    except s3_client.exceptions.ClientError:
+        return False
 
 
-def log_incident(collection, finding: dict) -> None:
+def scan_all_buckets_for_tags(s3_client, required_tag: str = "Environment"):
+    findings = []
+    response = s3_client.list_buckets()
+
+    for bucket in response["Buckets"]:
+        name = bucket["Name"]
+        has_tag = check_bucket_has_required_tag(s3_client, name, required_tag)
+        findings.append({"bucket_for_tagging": name, "has_required_tag": has_tag})
+
+    return findings
+
+
+def classify_finding(finding: dict) -> dict:
     if "bucket" in finding:
         resource_id = finding["bucket"]
         rule = "s3_kms_encryption"
@@ -133,21 +170,20 @@ def log_incident(collection, finding: dict) -> None:
     else:
         raise ValueError(f"Unknown finding shape: {finding}")
 
-    incident = {
-        "resource": resource_id,
-        "rule": rule,
-        "status": status,
-        "raw_finding": finding,
-        "timestamp": datetime.now(timezone.utc),
-    }
+    return {"resource": resource_id, "rule": rule, "status": status, "raw_finding": finding}
 
+
+def log_incident(collection, finding: dict) -> None:
+    classified = classify_finding(finding)
+    incident = {**classified, "timestamp": datetime.now(timezone.utc)}
     try:
         collection.insert_one(incident)
     except Exception as e:
-        print(f"[ERROR] Failed to log incident for {resource_id}: {e}")
+        print(f"[ERROR] Failed to log incident for {classified['resource']}: {e}")
+
 
 def print_findings(findings):
-    print(f"Scanning {len(findings)} bucket(s)...\n")
+    print(f"Scanning {len(findings)} bucket(s) for KMS encryption...\n")
     for f in findings:
         if f["uses_kms_before"]:
             print(f"[OK]        {f['bucket']} — already using KMS encryption")
@@ -167,26 +203,6 @@ def print_role_findings(findings):
         else:
             print(f"[OK]        {f['role']} — policies properly scoped")
 
-def check_bucket_has_required_tag(s3_client, bucket_name: str, required_tag: str = "Environment") -> bool:
-    
-    try:
-        response = s3_client.get_bucket_tagging(Bucket=bucket_name)
-        tag_keys = [tag["Key"] for tag in response["TagSet"]]
-        return required_tag in tag_keys
-    except s3_client.exceptions.ClientError:
-        return False
-
-def scan_all_buckets_for_tags(s3_client, required_tag: str = "Environment"):
-    
-    findings = []
-    response = s3_client.list_buckets()
-
-    for bucket in response["Buckets"]:
-        name = bucket["Name"]
-        has_tag = check_bucket_has_required_tag(s3_client, name, required_tag)
-        findings.append({"bucket_for_tagging": name, "has_required_tag": has_tag})
-
-    return findings
 
 def print_tag_findings(findings):
     print(f"\nScanning {len(findings)} bucket(s) for required tags...\n")
@@ -195,6 +211,47 @@ def print_tag_findings(findings):
             print(f"[OK]        {f['bucket_for_tagging']} — has required 'Environment' tag")
         else:
             print(f"[FINDING]   {f['bucket_for_tagging']} — missing required 'Environment' tag")
+
+
+def send_discord_alert(message: str) -> None:
+    if not DISCORD_WEBHOOK_URL:
+        print("[WARN] DISCORD_WEBHOOK_URL not set, skipping alert")
+        return
+
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=5)
+    except Exception as e:
+        print(f"[ERROR] Failed to send Discord alert: {e}")
+
+
+def build_alert_message(all_results: list) -> str | None:
+    
+    classified = [classify_finding(f) for f in all_results]
+    relevant = [c for c in classified if c["status"] in ("flagged", "error", "fixed")]
+
+    if not relevant:
+        return None
+
+    def severity_for(c):
+        return "FIXED" if c["status"] == "fixed" else RULE_SEVERITY.get(c["rule"], "LOW")
+
+    relevant.sort(key=lambda c: SEVERITY_ORDER[severity_for(c)])
+
+    issue_count = sum(1 for c in relevant if c["status"] != "fixed")
+    fixed_count = sum(1 for c in relevant if c["status"] == "fixed")
+
+    header = f"**CloudGuard Scan Alert** — {issue_count} issue(s) need review"
+    if fixed_count:
+        header += f", {fixed_count} auto-fixed"
+
+    lines = [header + ":\n"]
+    for c in relevant:
+        severity = severity_for(c)
+        emoji = SEVERITY_EMOJI[severity]
+        label = "AUTO-FIXED" if severity == "FIXED" else severity
+        lines.append(f"{emoji} `[{label}]` {c['rule']} — **{c['resource']}** ({c['status']})")
+
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
@@ -206,11 +263,14 @@ if __name__ == "__main__":
     role_results = scan_all_roles(iam_client)
     tag_results = scan_all_buckets_for_tags(s3_client)
 
-    all_results = bucket_results + role_results + tag_results
-
-    for finding in all_results:
-        log_incident(mongo_collection, finding)
-
     print_findings(bucket_results)
     print_role_findings(role_results)
     print_tag_findings(tag_results)
+
+    all_results = bucket_results + role_results + tag_results
+    for finding in all_results:
+        log_incident(mongo_collection, finding)
+
+    alert_message = build_alert_message(all_results)
+    if alert_message:
+        send_discord_alert(alert_message)
