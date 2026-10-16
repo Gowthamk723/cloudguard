@@ -219,7 +219,8 @@ def send_discord_alert(message: str) -> None:
         return
 
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=5)
+        response = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=5)
+        response.raise_for_status()
     except Exception as e:
         print(f"[ERROR] Failed to send Discord alert: {e}")
 
