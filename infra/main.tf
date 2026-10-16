@@ -42,3 +42,31 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "test" {
     }
   }
 }
+
+# Deliberately over-permissive test role so the scanner has an IAM finding
+resource "aws_iam_role" "test" {
+  name = "cloudguard-test-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "wildcard" {
+  name = "wildcard-policy"
+  role = aws_iam_role.test.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "*"
+      Resource = "*"
+    }]
+  })
+}
