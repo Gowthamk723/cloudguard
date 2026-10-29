@@ -294,7 +294,7 @@ def test_build_alert_message_includes_flagged_items():
     assert "HIGH" in message   
     assert "LOW" in message    
 
-
+@patch("scanner.scan.DISCORD_WEBHOOK_URL", "https://example.com/fake-webhook")
 @patch("scanner.scan.requests.post")
 def test_send_discord_alert_calls_post_with_correct_payload(mock_post):
     send_discord_alert("test message")
@@ -303,10 +303,17 @@ def test_send_discord_alert_calls_post_with_correct_payload(mock_post):
     args, kwargs = mock_post.call_args
     assert kwargs["json"] == {"content": "test message"}
 
-
+@patch("scanner.scan.DISCORD_WEBHOOK_URL", "https://example.com/fake-webhook")
 @patch("scanner.scan.requests.post", side_effect=Exception("network error"))
 def test_send_discord_alert_handles_failure_gracefully(mock_post):
     send_discord_alert("test message")
+
+@patch("scanner.scan.DISCORD_WEBHOOK_URL", None)
+@patch("scanner.scan.requests.post")
+def test_send_discord_alert_skips_when_webhook_not_configured(mock_post):
+    send_discord_alert("test message")
+
+    mock_post.assert_not_called()
 
 def test_build_alert_message_returns_none_when_clean():
     results = [
