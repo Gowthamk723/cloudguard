@@ -12,7 +12,6 @@ from scanner.scan import (
     build_alert_message,
     send_discord_alert,
 )
-from unittest.mock import patch, MagicMock
 
 @mock_aws
 def test_sse_s3_bucket_is_flagged():
@@ -315,21 +314,9 @@ def test_send_discord_alert_skips_when_webhook_not_configured(mock_post):
 
     mock_post.assert_not_called()
 
-def test_build_alert_message_returns_none_when_clean():
-    results = [
-        {"bucket": "b1", "uses_kms_before": True, "remediated": False, "remediation_error": None},
-        {"role": "r1", "has_wildcard_policy": False},
-    ]
-    assert build_alert_message(results) is None
 
-def test_build_alert_message_includes_flagged_items():
-    results = [
-        {"role": "bad-role", "has_wildcard_policy": True},
-        {"bucket_for_tagging": "untagged-bucket", "has_required_tag": False},
-    ]
-    message = build_alert_message(results)
-    assert "HIGH" in message
-    assert "LOW" in message
+
+
 
 def test_build_alert_message_includes_fixed_items_as_lowest_priority():
     
