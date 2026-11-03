@@ -175,7 +175,7 @@ def classify_finding(finding: dict) -> dict:
 
 def log_incident(collection, finding: dict) -> None:
     classified = classify_finding(finding)
-    incident = {**classified, "timestamp": datetime.now(timezone.utc)}
+    incident = {**classified, "source": os.getenv("SCAN_SOURCE", "local"), "timestamp": datetime.now(timezone.utc)}
     try:
         collection.insert_one(incident)
     except Exception as e:

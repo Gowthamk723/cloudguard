@@ -1,6 +1,6 @@
 import boto3
 from moto import mock_aws
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import json
 from scanner.scan import (
     check_bucket_uses_kms,
@@ -11,6 +11,7 @@ from scanner.scan import (
     scan_all_buckets_for_tags,
     build_alert_message,
     send_discord_alert,
+    log_incident
 )
 
 @mock_aws
@@ -316,8 +317,6 @@ def test_send_discord_alert_skips_when_webhook_not_configured(mock_post):
 
 
 
-
-
 def test_build_alert_message_includes_fixed_items_as_lowest_priority():
     
     results = [
@@ -338,3 +337,23 @@ def test_build_alert_message_returns_none_for_only_compliant_resources():
         {"bucket": "clean-bucket", "uses_kms_before": True, "remediated": False, "remediation_error": None},
     ]
     assert build_alert_message(results) is None
+
+
+def test_log_incident_tags_source_from_env(monkeypatch):
+    monkeypatch.setenv("SCAN_SOURCE", "ci")
+    collection = MagicMock()
+
+    log_incident(collection, {"role": "r1", "has_wildcard_policy": True})
+
+    doc = collection.insert_one.call_args[0][0]
+    assert doc["source"] == "ci"
+
+
+def test_log_incident_defaults_source_to_local(monkeypatch):
+    monkeypatch.delenv("SCAN_SOURCE", raising=False)
+    collection = MagicMock()
+
+    log_incident(collection, {"role": "r1", "has_wildcard_policy": True})
+
+    doc = collection.insert_one.call_args[0][0]
+    assert doc["source"] == "local"

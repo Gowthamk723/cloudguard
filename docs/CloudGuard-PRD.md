@@ -1,10 +1,10 @@
 # Product Requirements Document
 ## CloudGuard: Cloud Security & Cost Governance Scanner
 
-**Author:** [Your Name]
+**Author:** Gowtham
 **Status:** Draft — In Development
 **Last Updated:** September 2026
-**Build philosophy:** 100% free, no credit/debit card required anywhere, no student-pack dependency
+**Build philosophy:** 100% free
 
 ---
 
