@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from dashboard.api.incidents import get_incidents, serialize_incident
@@ -52,3 +53,8 @@ def test_limit_is_clamped():
     collection = make_collection([])
     get_incidents(collection, limit=10_000)
     collection.find.return_value.sort.return_value.limit.assert_called_with(500)
+
+def test_local_source_includes_legacy_documents():
+    collection = make_collection([])
+    get_incidents(collection, source="local")
+    collection.find.assert_called_with({"source": {"$ne": "ci"}})
