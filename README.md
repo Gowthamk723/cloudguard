@@ -17,7 +17,7 @@ Built and tested end-to-end against **LocalStack**, a local AWS emulator, with a
 | Discord alerts with severity-ranked summaries | Done |
 | Unit and integration tests | Done |
 | Terraform test environment | Done |
-| GitHub Actions scheduled scans and CI | Planned |
+| GitHub Actions scheduled scans and CI | Done |
 | Dashboard (React + Vercel) | Planned |
 
 ---
@@ -316,6 +316,22 @@ For improved security:
 - Rotate credentials regularly.
 
 Database credentials should not be treated as the only security boundary.
+
+---
+
+## CI/CD (GitHub Actions)
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | Every push and pull request | Installs dev dependencies, runs unit tests |
+| `scan.yml` | Daily at 03:00 UTC, or manually | Runs unit tests, then starts LocalStack, applies Terraform, runs the scanner |
+
+The scan job only runs if the tests pass. It needs three repository secrets:
+`MONGODB_URI`, `DISCORD_WEBHOOK_URL`, `LOCALSTACK_AUTH_TOKEN`.
+Incidents are tagged `source: ci` or `source: local` so they can be told apart.
+
+Dependencies are split: `requirements.txt` (runtime), `requirements-dev.txt`
+(tests), `requirements-local.txt` (local tooling, never installed in CI).
 
 ---
 
