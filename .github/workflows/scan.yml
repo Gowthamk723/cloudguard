@@ -1,0 +1,67 @@
+name: Scheduled Scan
+
+on:
+  schedule:
+    - cron: "0 3 * * *"      
+  workflow_dispatch:          
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: scanner/requirements*.txt
+      - run: pip install -r scanner/requirements-dev.txt
+      - run: pytest tests/unit -v
+
+  scan:
+    needs: test               
+    runs-on: ubuntu-latest
+    env:
+      LOCALSTACK_ENDPOINT: http://localhost:4566
+      TF_VAR_localstack_endpoint: http://localhost:4566
+      TF_VAR_aws_access_key: test
+      TF_VAR_aws_secret_key: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: scanner/requirements*.txt
+      - run: pip install -r scanner/requirements.txt
+
+      - name: Start LocalStack
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+        run: |
+          docker run -d --name localstack -p 4566:4566 \
+            -e LOCALSTACK_AUTH_TOKEN \
+            localstack/localstack
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:4566/_localstack/health | grep -q '"s3"'; then
+              echo "LocalStack is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "LocalStack did not start"; docker logs localstack; exit 1
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Build test infrastructure
+        working-directory: infra
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Run scanner
+        env:
+          SCAN_SOURCE: ci
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python scanner/scan.py
