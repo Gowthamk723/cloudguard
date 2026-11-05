@@ -347,4 +347,36 @@ The following features are planned:
 - **Expanded Detection Coverage:** Add more AWS security and cost governance rules.
 
 
+## Scope and Production Considerations
+
+CloudGuard is a portfolio project tested against LocalStack, a local AWS
+emulator. The design choices below are deliberate for that scope, and several
+would need to change in a real environment.
+
+**Test data is small.** The demo uses one bucket and one IAM role so each rule
+can be shown end to end. The scanners iterate over all resources, but the demo
+does not yet show a large, mixed estate.
+
+**Repeated findings.** The scanner re-reports unresolved findings every run.
+Production tools alert on changes (new, resolved, worsened) rather than
+repeating known issues. Change-based alerting is planned.
+
+**Auto-remediation is simplified.** Changing a bucket's default encryption
+does not cause downtime and only affects new objects. The real risks are
+permissions (uploaders and readers need KMS access), key choice (a
+customer-managed key is usually required, and this project uses the default
+AWS-managed one), cost, and blast radius. A production version would add
+dry-run mode, exclusion tags, KMS pre-checks, a per-run change limit, human
+approval for production accounts, and a stored rollback record.
+
+**Detection is deliberately narrow.** Three rules cover the core ideas.
+Production environments use services such as AWS Config or Security Hub for
+broad coverage, and a tool like this complements them.
+
+**Remediation versus infrastructure as code.** Resources managed by Terraform
+drift when the scanner changes them. Production options are
+`lifecycle { ignore_changes }` on remediated attributes, or opening a pull
+request instead of changing resources directly.
+
+
 **CloudGuard — Detect misconfigurations. Automate safe fixes. Maintain an auditable cloud security posture.**
