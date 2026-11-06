@@ -1,111 +1,66 @@
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
-
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  --bg: #0b1020;
+  --surface: #121933;
+  --border: #232c4d;
+  --text: #e6e9f2;
+  --muted: #8b93b0;
+  --flagged: #ff6b6b;
+  --fixed: #3ddc97;
+  --compliant: #7aa2ff;
+  --font: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
+.page { max-width: 880px; margin: 0 auto; padding: 2rem 1rem; }
+.brand { font-size: 1.1rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.empty { color: var(--muted); }
+.empty--error { color: var(--flagged); }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
+.chip {
   font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
 }
+.chip--ci { background: var(--compliant); color: var(--bg); font-weight: 700; }
+.chip--local { border: 1px solid var(--muted); color: var(--muted); }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+.strip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+.strip__head { display: flex; align-items: center; gap: 0.75rem; }
+.strip__head h2 { margin: 0; font-size: 1rem; }
+.strip__time { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+
+.strip__stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin: 1.5rem 0; }
+.stat { border-left: 3px solid var(--border); padding-left: 1rem; }
+.stat__value { display: block; font-family: var(--mono); font-size: 2.75rem; line-height: 1; }
+.stat__label { color: var(--muted); font-size: 0.85rem; }
+.stat--flagged { border-color: var(--flagged); }
+.stat--flagged .stat__value { color: var(--flagged); }
+.stat--fixed { border-color: var(--fixed); }
+.stat--fixed .stat__value { color: var(--fixed); }
+.stat--compliant { border-color: var(--compliant); }
+.stat--compliant .stat__value { color: var(--compliant); }
+
+.strip__foot { color: var(--muted); font-size: 0.8rem; }
+
+.runs { list-style: none; padding: 0; color: var(--muted); font-size: 0.9rem; }
+.runs li { padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
+
+@media (max-width: 520px) {
+  .strip__stats { grid-template-columns: 1fr; }
 }
