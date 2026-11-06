@@ -1,0 +1,7 @@
+[project]
+name = "cloudguard-dashboard"
+version = "0.1.0"
+dependencies = ["pymongo[srv]==4.18.1"]
+
+[tool.vercel]
+entrypoint = "api.incidents:handler"

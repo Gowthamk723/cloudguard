@@ -58,3 +58,7 @@ def test_local_source_includes_legacy_documents():
     collection = make_collection([])
     get_incidents(collection, source="local")
     collection.find.assert_called_with({"source": {"$ne": "ci"}})
+
+def test_naive_timestamp_is_treated_as_utc():
+    item = serialize_incident(good_doc(timestamp=datetime(2026, 11, 3, 10, 0, 0)))
+    assert item["timestamp"].endswith("+00:00")

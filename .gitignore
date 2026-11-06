@@ -9,3 +9,6 @@ __pycache__/
 *.tfstate.backup
 terraform.tfvars
 *.auto.tfvars
+
+.vercel/
+node_modules/

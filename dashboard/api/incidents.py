@@ -2,6 +2,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from datetime import timezone
 
 REQUIRED_FIELDS = ("rule", "status", "timestamp")
 
@@ -12,13 +13,20 @@ def serialize_incident(doc: dict) -> dict | None:
         return None
 
     timestamp = doc["timestamp"]
+    if hasattr(timestamp, "isoformat"):
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamp = timestamp.isoformat()
+    else:
+        timestamp = str(timestamp)
+
     return {
         "id": str(doc["_id"]),
         "resource": resource,
         "rule": doc["rule"],
         "status": doc["status"],
         "source": doc.get("source", "local"),
-        "timestamp": timestamp.isoformat() if hasattr(timestamp, "isoformat") else str(timestamp),
+        "timestamp": timestamp,
     }
 
 
@@ -70,6 +78,7 @@ class handler(BaseHTTPRequestHandler):
         try:
             body = get_incidents(_get_collection(), limit, source)
         except Exception:
+            traceback.print_exc()
             return self._send(503, {"error": "database unavailable"})
 
         self._send(200, body)
