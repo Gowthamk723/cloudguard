@@ -1,22 +1,34 @@
+import { useMemo } from 'react'
 import { useIncidents } from './hooks/useIncidents'
+import { summarizeAll } from './lib/summary'
+import SummaryStrip from './components/SummaryStrip'
+import SourceChip from './components/SourceChip'
 
 export default function App() {
   const { status, runs, error } = useIncidents()
-
-  if (status === 'loading') return <p>Loading…</p>
-  if (status === 'error') return <p>Could not load incidents: {error}</p>
+  const summary = useMemo(() => summarizeAll(runs), [runs])
 
   return (
-    <main>
-      <h1>CloudGuard</h1>
-      <p>{runs.length} scan runs</p>
-      <ul>
-        {runs.map((run) => (
-          <li key={run.id}>
-            [{run.source}] {new Date(run.newest).toLocaleString()} — {run.incidents.length} findings
-          </li>
-        ))}
-      </ul>
+    <main className="page">
+      <h1 className="brand">CloudGuard</h1>
+
+      {status === 'loading' && <p className="empty">Loading…</p>}
+      {status === 'error' && <p className="empty empty--error">Could not load incidents: {error}</p>}
+
+      {status === 'ready' && (
+        <>
+          <SummaryStrip summary={summary} />
+          {/* Temporary list until the timeline lands in Part 4 */}
+          <ul className="runs">
+            {runs.map((run) => (
+              <li key={run.id}>
+                <SourceChip source={run.source} />{' '}
+                {new Date(run.newest).toLocaleString()} · {run.incidents.length} findings
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </main>
   )
 }
