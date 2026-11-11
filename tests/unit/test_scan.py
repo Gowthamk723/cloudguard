@@ -2,6 +2,8 @@ import boto3
 from moto import mock_aws
 from unittest.mock import patch, MagicMock
 import json
+import pytest
+from botocore.exceptions import ClientError
 from scanner.scan import (
     check_bucket_uses_kms,
     scan_all_buckets,
@@ -11,7 +13,11 @@ from scanner.scan import (
     scan_all_buckets_for_tags,
     build_alert_message,
     send_discord_alert,
-    log_incident
+    log_incident,
+    check_bucket_is_idle,
+    check_bucket_has_lifecycle,
+    scan_all_buckets_for_idle,
+    scan_all_buckets_for_lifecycle
 )
 
 @mock_aws
@@ -357,3 +363,76 @@ def test_log_incident_defaults_source_to_local(monkeypatch):
 
     doc = collection.insert_one.call_args[0][0]
     assert doc["source"] == "local"
+
+@mock_aws
+def test_empty_bucket_is_idle():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="empty-bucket")
+    assert check_bucket_is_idle(client, "empty-bucket") is True
+
+
+@mock_aws
+def test_bucket_with_object_is_not_idle():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="busy-bucket")
+    client.put_object(Bucket="busy-bucket", Key="a.txt", Body=b"hello")
+    assert check_bucket_is_idle(client, "busy-bucket") is False
+
+
+@mock_aws
+def test_bucket_without_lifecycle_is_flagged():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="no-lifecycle")
+    assert check_bucket_has_lifecycle(client, "no-lifecycle") is False
+
+
+@mock_aws
+def test_bucket_with_lifecycle_is_not_flagged():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="has-lifecycle")
+    client.put_bucket_lifecycle_configuration(
+        Bucket="has-lifecycle",
+        LifecycleConfiguration={
+            "Rules": [{"ID": "expire", "Status": "Enabled",
+                       "Filter": {"Prefix": ""}, "Expiration": {"Days": 30}}]
+        },
+    )
+    assert check_bucket_has_lifecycle(client, "has-lifecycle") is True
+
+
+def test_lifecycle_check_reraises_unexpected_errors():
+    """An access error must NOT be reported as 'no lifecycle'."""
+    client = MagicMock()
+    client.get_bucket_lifecycle_configuration.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+        "GetBucketLifecycleConfiguration",
+    )
+    with pytest.raises(ClientError):
+        check_bucket_has_lifecycle(client, "any-bucket")
+
+
+@mock_aws
+def test_idle_scan_distinguishes_empty_from_busy():
+    client = boto3.client("s3", region_name="us-east-1")
+    client.create_bucket(Bucket="empty-b")
+    client.create_bucket(Bucket="busy-b")
+    client.put_object(Bucket="busy-b", Key="a.txt", Body=b"x")
+    results = {f["bucket_for_idle"]: f["is_idle"] for f in scan_all_buckets_for_idle(client)}
+    assert results == {"empty-b": True, "busy-b": False}
+
+
+def test_idle_scan_skips_a_failing_bucket_and_continues():
+    client = MagicMock()
+    client.list_buckets.return_value = {"Buckets": [{"Name": "bad"}, {"Name": "good"}]}
+    client.list_objects_v2.side_effect = [Exception("boom"), {"KeyCount": 1}]
+    findings = scan_all_buckets_for_idle(client)
+    assert findings == [{"bucket_for_idle": "good", "is_idle": False}]
+
+
+def test_alert_message_includes_cost_rules_with_medium_severity():
+    message = build_alert_message([
+        {"bucket_for_lifecycle": "b1", "has_lifecycle": False},
+        {"bucket_for_idle": "b2", "is_idle": True},
+    ])
+    assert "MEDIUM" in message and "s3_no_lifecycle" in message
+    assert "s3_idle_bucket" in message
