@@ -3,7 +3,7 @@
 
 A scheduled cloud security and cost governance scanner that detects cloud misconfigurations, identifies storage-cost hygiene issues, automatically fixes safe problems, and flags risky configurations for human review.
 
-Built and tested using **LocalStack** (a local AWS emulator) and **Terraform**.
+Built and tested using **LocalStack** and **Terraform**.
 
 **Live Dashboard:** https://cloudguard-peach.vercel.app
 
