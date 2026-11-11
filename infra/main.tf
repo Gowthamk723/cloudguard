@@ -27,12 +27,14 @@ provider "aws" {
 }
 
 locals {
+  kb_chunk = join("", [for i in range(1024) : "x"])
+  mb_chunk = join("", [for i in range(1024) : local.kb_chunk])
   buckets = {
-    "cg-prod-app-data"   = { sse = "aws:kms", env = "production", lifecycle = true,  has_object = true }
-    "cg-prod-logs"       = { sse = "aws:kms", env = "production", lifecycle = true,  has_object = true }
-    "cg-dev-scratch"     = { sse = "AES256",  env = "dev",        lifecycle = false, has_object = true }
-    "cg-untagged-legacy" = { sse = "AES256",  env = null,         lifecycle = false, has_object = true }
-    "cg-orphan-empty"    = { sse = "AES256",  env = "staging",    lifecycle = true,  has_object = false }
+    "cg-prod-app-data"   = { sse = "aws:kms", env = "production", lifecycle = true,  size_kb = 4096 }
+    "cg-prod-logs"       = { sse = "aws:kms", env = "production", lifecycle = true,  size_kb = 2048 }
+    "cg-dev-scratch"     = { sse = "AES256",  env = "dev",        lifecycle = false, size_kb = 1024 }
+    "cg-untagged-legacy" = { sse = "AES256",  env = null,         lifecycle = false, size_kb = 3072 }
+    "cg-orphan-empty"    = { sse = "AES256",  env = "staging",    lifecycle = true,  size_kb = 0 }
   }
 
   roles = {
@@ -74,10 +76,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
 }
 
 resource "aws_s3_object" "sample" {
-  for_each = { for k, v in local.buckets : k => v if v.has_object }
+  for_each = { for k, v in local.buckets : k => v if v.size_kb > 0 }
   bucket   = aws_s3_bucket.this[each.key].id
-  key      = "sample.txt"
-  content  = "demo data"
+  key      = "sample.dat"
+  content  = sensitive(join("", [for i in range(each.value.size_kb / 1024) : local.mb_chunk]))
 }
 
 resource "aws_iam_role" "this" {
