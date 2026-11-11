@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import boto3
 from pymongo import MongoClient
 import requests
+from botocore.exceptions import ClientError
 
 load_dotenv()
 
@@ -13,7 +14,9 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 RULE_SEVERITY = {
     "s3_kms_encryption": "HIGH",
     "iam_wildcard_policy": "HIGH",
+    "s3_no_lifecycle": "MEDIUM",
     "s3_required_tag": "LOW",
+    "s3_idle_bucket": "LOW",
 }
 
 SEVERITY_EMOJI = {"HIGH": "🔴", "MEDIUM": "🟠", "LOW": "🟡", "FIXED": "✅"}
@@ -148,6 +151,44 @@ def scan_all_buckets_for_tags(s3_client, required_tag: str = "Environment"):
 
     return findings
 
+def check_bucket_is_idle(s3_client, bucket_name: str) -> bool:
+    
+    response = s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
+    return response["KeyCount"] == 0
+
+
+def check_bucket_has_lifecycle(s3_client, bucket_name: str) -> bool:
+    
+    try:
+        response = s3_client.get_bucket_lifecycle_configuration(Bucket=bucket_name)
+        return len(response.get("Rules", [])) > 0
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "NoSuchLifecycleConfiguration":
+            return False
+        raise
+
+
+def scan_all_buckets_for_idle(s3_client):
+    findings = []
+    for bucket in s3_client.list_buckets()["Buckets"]:
+        name = bucket["Name"]
+        try:
+            findings.append({"bucket_for_idle": name, "is_idle": check_bucket_is_idle(s3_client, name)})
+        except Exception as e:
+            print(f"[ERROR] Idle check failed for {name}: {e}")
+    return findings
+
+
+def scan_all_buckets_for_lifecycle(s3_client):
+    findings = []
+    for bucket in s3_client.list_buckets()["Buckets"]:
+        name = bucket["Name"]
+        try:
+            findings.append({"bucket_for_lifecycle": name, "has_lifecycle": check_bucket_has_lifecycle(s3_client, name)})
+        except Exception as e:
+            print(f"[ERROR] Lifecycle check failed for {name}: {e}")
+    return findings
+
 
 def classify_finding(finding: dict) -> dict:
     if "bucket" in finding:
@@ -167,6 +208,14 @@ def classify_finding(finding: dict) -> dict:
         resource_id = finding["bucket_for_tagging"]
         rule = "s3_required_tag"
         status = "compliant" if finding["has_required_tag"] else "flagged"
+    elif "bucket_for_idle" in finding:
+        resource_id = finding["bucket_for_idle"]
+        rule = "s3_idle_bucket"
+        status = "flagged" if finding["is_idle"] else "compliant"
+    elif "bucket_for_lifecycle" in finding:
+        resource_id = finding["bucket_for_lifecycle"]
+        rule = "s3_no_lifecycle"
+        status = "compliant" if finding["has_lifecycle"] else "flagged"
     else:
         raise ValueError(f"Unknown finding shape: {finding}")
 
@@ -212,6 +261,22 @@ def print_tag_findings(findings):
         else:
             print(f"[FINDING]   {f['bucket_for_tagging']} — missing required 'Environment' tag")
 
+def print_idle_findings(findings):
+    print(f"\nScanning {len(findings)} bucket(s) for idle storage...\n")
+    for f in findings:
+        if f["is_idle"]:
+            print(f"[FINDING]   {f['bucket_for_idle']} — bucket is empty (possibly orphaned)")
+        else:
+            print(f"[OK]        {f['bucket_for_idle']} — contains objects")
+
+
+def print_lifecycle_findings(findings):
+    print(f"\nScanning {len(findings)} bucket(s) for lifecycle policies...\n")
+    for f in findings:
+        if f["has_lifecycle"]:
+            print(f"[OK]        {f['bucket_for_lifecycle']} — lifecycle policy present")
+        else:
+            print(f"[FINDING]   {f['bucket_for_lifecycle']} — no lifecycle policy (storage grows unbounded)")
 
 def send_discord_alert(message: str) -> None:
     if not DISCORD_WEBHOOK_URL:
@@ -263,15 +328,22 @@ if __name__ == "__main__":
     bucket_results = scan_all_buckets(s3_client, auto_remediate=True)
     role_results = scan_all_roles(iam_client)
     tag_results = scan_all_buckets_for_tags(s3_client)
+    idle_results = scan_all_buckets_for_idle(s3_client)
+    lifecycle_results = scan_all_buckets_for_lifecycle(s3_client)
 
-    print_findings(bucket_results)
-    print_role_findings(role_results)
-    print_tag_findings(tag_results)
+    all_results = (
+        bucket_results + role_results + tag_results + idle_results + lifecycle_results
+    )
 
-    all_results = bucket_results + role_results + tag_results
     for finding in all_results:
         log_incident(mongo_collection, finding)
 
     alert_message = build_alert_message(all_results)
     if alert_message:
         send_discord_alert(alert_message)
+
+    print_findings(bucket_results)
+    print_role_findings(role_results)
+    print_tag_findings(tag_results)
+    print_idle_findings(idle_results)
+    print_lifecycle_findings(lifecycle_results)
