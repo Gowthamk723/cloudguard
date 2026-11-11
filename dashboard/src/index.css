@@ -96,6 +96,13 @@ body {
 .more:hover { border-color: var(--muted); }
 
 .skeleton__block { height: 120px; border-radius: 16px; background: var(--surface); margin-bottom: 1rem; animation: pulse 1.4s ease-in-out infinite; }
+
+.strip__cost { margin: 0 0 1rem; font-size: 0.9rem; }
+.strip__cost span { color: var(--muted); }
+.finding__cost { font-style: normal; color: var(--medium); font-size: 0.8rem; }
+.toggle { margin-top: 0.75rem; background: none; border: none; color: var(--muted); cursor: pointer; font-family: inherit; font-size: 0.8rem; padding: 0; }
+.toggle:hover { color: var(--text); }
+
 @keyframes pulse { 50% { opacity: 0.5; } }
 @media (prefers-reduced-motion: reduce) { .skeleton__block { animation: none; } }
 

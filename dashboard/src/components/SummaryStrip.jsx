@@ -1,5 +1,6 @@
 import SourceChip from './SourceChip'
 import { timeAgo } from '../lib/time'
+import { formatUsd } from '../lib/cost'
 
 const STATS = [
   { key: 'flagged', label: 'Needs review' },
@@ -27,6 +28,14 @@ export default function SummaryStrip({ summary }) {
             <span className="stat__label">{label}</span>
           </div>
         ))}
+
+        {latest.cost > 0 && (
+        <p className="strip__cost">
+          Estimated storage cost with no expiry policy:{' '}
+          <strong>{formatUsd(latest.cost)}</strong> / month
+          <span> · an estimate, assumptions in the README</span>
+        </p>
+      )}
       </div>
 
       <footer className="strip__foot">

@@ -1,3 +1,5 @@
+import { runCost } from './cost'
+
 const NEEDS_REVIEW = new Set(['flagged', 'error'])
 
 export function summarizeRun(run) {
@@ -14,9 +16,10 @@ export function summarizeAll(runs) {
   const latest = runs[0]
   return {
     latest: latest
-      ? { ...summarizeRun(latest), source: latest.source, time: latest.newest }
+      ? { ...summarizeRun(latest), source: latest.source, cost: runCost(latest), time: latest.newest }
       : null,
     totalRuns: runs.length,
     totalFixed: runs.reduce((sum, run) => sum + summarizeRun(run).fixed, 0),
+    
   }
 }

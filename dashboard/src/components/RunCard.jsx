@@ -1,11 +1,18 @@
+import { useState } from 'react'
 import SourceChip from './SourceChip'
 import FindingRow from './FindingRow'
-import { sortFindings, worstSeverity } from '../lib/rules'
+import { describeFinding, sortFindings, worstSeverity } from '../lib/rules'
 import { timeAgo } from '../lib/time'
 
 export default function RunCard({ run }) {
+  const [showOk, setShowOk] = useState(false)
+  const sorted = sortFindings(run.incidents)
+  const isOk = (i) => describeFinding(i).severity === 'OK'
+  const okCount = sorted.filter(isOk).length
+  const visible = showOk ? sorted : sorted.filter((i) => !isOk(i))
   const worst = worstSeverity(run.incidents).toLowerCase()
   const date = new Date(run.newest)
+
   return (
     <li className="run">
       <span className={`run__dot run__dot--${worst}`} aria-hidden="true" />
@@ -17,10 +24,15 @@ export default function RunCard({ run }) {
           </time>
         </header>
         <ul className="findings">
-          {sortFindings(run.incidents).map((incident) => (
+          {visible.map((incident) => (
             <FindingRow key={incident.id} incident={incident} />
           ))}
         </ul>
+        {okCount > 0 && (
+          <button className="toggle" onClick={() => setShowOk((v) => !v)}>
+            {showOk ? 'Hide' : 'Show'} {okCount} compliant
+          </button>
+        )}
       </article>
     </li>
   )
