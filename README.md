@@ -1,382 +1,264 @@
-# CloudGuard
 
-**Automated Cloud Security & Cost Governance Scanner**
+# CloudGuard — Cloud Security & Cost Governance Scanner
 
-CloudGuard is an automated cloud security and cost governance scanner that detects common AWS misconfigurations, automatically remediates safe issues, flags risky configurations through Discord alerts, and records every scan result in a persistent MongoDB Atlas audit trail.
+A scheduled cloud security and cost governance scanner that detects cloud misconfigurations, identifies storage-cost hygiene issues, automatically fixes safe problems, and flags risky configurations for human review.
 
-Built and tested end-to-end against **LocalStack**, a local AWS emulator, with a fully reproducible test environment provisioned using Terraform.
+Built and tested using **LocalStack** (a local AWS emulator) and **Terraform**.
 
----
-
-## Status
-
-| Phase | Status |
-| --- | --- |
-| Scanner rules (S3 encryption, IAM wildcard, missing tags) | Done |
-| Auto-remediation and MongoDB audit logging | Done |
-| Discord alerts with severity-ranked summaries | Done |
-| Unit and integration tests | Done |
-| Terraform test environment | Done |
-| GitHub Actions scheduled scans and CI | Done |
-| Dashboard (React + Vercel) | Planned |
+**Live Dashboard:** https://cloudguard-peach.vercel.app
 
 ---
 
-## Detection Rules
+##  Architecture Diagram:
 
-| Rule | Resource | Action |
-| --- | --- | --- |
-| S3 bucket not using KMS encryption | S3 | Auto-remediated by applying `aws:kms` encryption |
-| IAM role with `Action: "*"` on `Resource: "*"` | IAM | Flag only; no remediation code exists by design |
-| S3 bucket missing the `Environment` tag | S3 | Flag only |
-
-> **Design Philosophy:** Reversible, low-risk fixes are automated. Anything affecting permissions or ownership labels requires human judgment and is strictly flagged for review.
-
----
-
-## Tech Stack
-
-- **Languages & Core:** Python, `boto3`
-- **Testing:** `pytest`, `moto`, Terraform, LocalStack
-- **Infrastructure & Storage:** MongoDB Atlas, Docker
-- **Notifications:** Discord webhooks
-- **Infrastructure as Code:** Terraform
-
----
-
-## Project Structure
-
+```mermaid
+flowchart LR
+  CRON[GitHub Actions<br/>Daily Schedule] --> SCAN[Python Scanner<br/>boto3]
+  TF[Terraform] --> LS[(LocalStack<br/>S3 and IAM)]
+  SCAN -->|Detect and Auto-Fix| LS
+  SCAN -->|Every Finding| DB[(MongoDB Atlas)]
+  SCAN -->|Issues and Fixes| DC[Discord Webhook]
+  DB --> API[Vercel Python API<br/>Read-Only User]
+  API --> UI[React Dashboard]
 ```
+
+---
+
+##  Detection Rules
+
+| Rule | Resource | Severity | Action |
+|---|---|---|---|
+| Bucket not using KMS encryption | S3 | HIGH | **Auto-fixed** (`aws:kms`) |
+| Wildcard IAM policy (`Action:*`, `Resource:*`) | IAM | HIGH | Flag only; no remediation |
+| Bucket has no lifecycle policy | S3 | MEDIUM | Flagged with a cost estimate |
+| Missing `Environment` tag | S3 | LOW | Flag only |
+| Idle bucket (no objects) | S3 | LOW | Flag only |
+
+### Remediation Policy
+
+Reversible, low-risk fixes are automated. Anything involving permissions, deletion, or ownership labels requires human review.
+
+---
+
+##  Tech Stack:
+
+- **Language:** Python
+- **AWS SDK:** boto3
+- **Testing:** pytest, moto
+- **Infrastructure as Code:** Terraform
+- **AWS Emulator:** LocalStack
+- **Database:** MongoDB Atlas
+- **Notifications:** Discord Webhooks
+- **CI/CD:** GitHub Actions
+- **Frontend:** React, Vite
+- **Frontend Testing:** Vitest
+- **Deployment:** Vercel
+
+---
+
+##  Project Structure:
+
+```text
 cloudguard/
 ├── scanner/
-│   ├── scan.py
-│   └── requirements.txt
-├── tests/
-│   ├── unit/
-│   └── integration/
+├── dashboard/
+│   ├── api/
+│   └── src/
 ├── infra/
-├── docs/
-│   └── PRD.md
-├── .env.example
-└── README.md
+├── tests/
+├── .github/
+│   └── workflows/
+└── docs/
+    └── PRD.md
 ```
 
 ---
 
-## Prerequisites
+##  Setup:
 
-Install or configure the following before getting started:
-
-- Docker Desktop
+#### Prerequisites
+- Docker
 - Python 3.10+
 - Terraform 1.5+
-- Git
-- LocalStack account
-- MongoDB Atlas cluster
-- Discord webhook URL
+- Node.js 20+
+- Free LocalStack account
+- Free MongoDB Atlas cluster
+- Discord Webhook URL
 
----
+### 1. Clone the Repository
 
-## Setup
-
-### 1\. Clone the Repository
-
-Replace `<your-username>` with your GitHub username.
-
-```
-git clone https://github.com/<your-username>/cloudguard.git
+```powershell
+git clone https://github.com/Gowthamk723/cloudguard.git
 cd cloudguard
 ```
 
-### 2\. Create a Virtual Environment
+### 2. Set Up the Python Environment
 
-```
+```powershell
 python -m venv venv
 venv\Scripts\Activate.ps1
+
+pip install -r scanner/requirements-dev.txt
+pip install -r scanner/requirements-local.txt
 ```
 
-Install the project dependencies:
+### 3. Configure Environment Variables
 
+Copy `.env.example` to `.env` and configure:
+
+```env
+LOCALSTACK_ENDPOINT=
+MONGODB_URI=
+DISCORD_WEBHOOK_URL=
 ```
-pip install -r scanner/requirements.txt
-```
-
-### 3\. Configure Environment Variables
-
-Copy `.env.example` to `.env` and fill in the required values.
-
-Example configuration:
-
-```
-LOCALSTACK_ENDPOINT=http://localhost:4566
-MONGODB_URI=mongodb+srv://<username>:<password>@<cluster-url>/?appName=Cluster0
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
-```
-
-Replace the placeholders with your actual MongoDB Atlas connection string and Discord webhook URL.
-
 
 ---
 
-## Local Test Environment (Terraform + LocalStack)
+##  Run the Local Environment
 
-All test resources are defined in the `infra/` directory and provisioned against LocalStack.
+### 1. Start LocalStack
 
-### 1\. Start Docker Desktop
-
-Ensure Docker Desktop is running before starting LocalStack.
-
-### 2\. Start LocalStack
-
-Open PowerShell and run:
-
-```
+```powershell
 localstack start -d
 ```
 
-Verify that LocalStack is running before continuing.
+### 2. Configure Terraform
 
-### 3\. Configure Terraform
-
-Navigate to the infrastructure directory:
-
-```
+```powershell
 cd infra
-```
 
-Copy the example Terraform variables file:
+copy terraform.tfvars.example terraform.tfvars
 
-```
-Copy-Item terraform.tfvars.example terraform.tfvars
-```
-
-Edit `terraform.tfvars` if any configuration values need to be adjusted.
-
-### 4\. Initialize Terraform
-
-Run this command the first time you provision the environment:
-
-```
 terraform init
-```
-
-### 5\. Provision the Test Resources
-
-```
 terraform apply
 ```
 
-Review the execution plan and confirm the changes when prompted.
+### 3. Run the Scanner
 
-Terraform creates deliberately misconfigured resources to give CloudGuard real findings to detect, including:
-
-- An S3 bucket using AES256 encryption instead of customer-managed KMS encryption.
-- An S3 bucket without the required `Environment` tag.
-- An over-permissive IAM role with wildcard permissions.
-
-These resources provide a repeatable test environment for validating detection, remediation, alerting, and audit logging.
-
-### Resetting the Lab
-
-CloudGuard modifies resources when it automatically remediates issues. Because the scanner operates on Terraform-managed resources, the infrastructure may drift from the Terraform configuration after a scan.
-
-Run the following command to restore the lab to its configured state:
-
-```
-terraform apply
-```
-
-Review the proposed changes before confirming them.
-
-Run this reset step at the beginning of each test session if resources have been modified or LocalStack has restarted. Verify the actual state after a restart, since persistence behavior depends on the LocalStack configuration and deployment.
-
----
-
-## Running the Scanner
-
-From the repository root, activate your virtual environment if necessary and run:
-
-```
+```powershell
+cd ..
 python scanner\scan.py
 ```
 
-For each scan, CloudGuard:
-
-1. Inspects the configured AWS resources.
-2. Detects security misconfigurations.
-3. Automatically remediates eligible low-risk issues.
-4. Records scan results and findings in MongoDB Atlas.
-5. Sends a single severity-ranked summary alert to Discord when issues are detected or remediated.
-
-Clean scans do not send Discord alerts, helping reduce alert fatigue.
+**Note:** Running `terraform apply` rebuilds the infrastructure and resets anything the scanner previously fixed.
 
 ---
 
-## Running the Tests
+##  Run the Dashboard
 
-### Unit Tests
+Navigate to the dashboard directory:
 
-Unit tests use `moto` to mock AWS services in memory.
-
-Run:
-
+```powershell
+cd dashboard
 ```
+
+Install dependencies:
+
+```powershell
+npm install
+```
+
+Start the development server:
+
+```powershell
+npm run dev
+```
+
+---
+
+##  Tests:
+
+#### Unit Tests:
+
+```powershell
 pytest tests\unit --cov=scanner -v
 ```
 
-The unit tests cover the detection rules, negative cases, and failure scenarios, including:
+#### Integration Tests:
 
-- Remediation errors.
-- Database write failures.
-- Discord webhook outages.
-- Compliant resources.
-- Misconfigured resources.
-
-### Integration Tests
-
-Run:
-
-```
+```powershell
 pytest tests\integration -v
 ```
 
-Integration tests validate behavior against the configured test environment and MongoDB Atlas.
+#### Dashboard Tests:
 
-**Note:** These tests write directly to the configured Atlas cluster and clean up after themselves. Ensure the integration-test database and credentials are configured correctly before running them.
+```powershell
+cd dashboard
+npm test
+```
 
----
+Unit tests cover every detection rule, including negative cases and failure scenarios:
 
-## Design Notes
-
-### 1\. Dependency Injection
-
-AWS and database clients are passed into functions rather than created internally.
-
-This approach improves testability, makes it easier to substitute mocked dependencies with `moto`, and separates business logic from infrastructure setup.
-
-### 2\. Log Everything, Alert Selectively
-
-Every scan result, including compliant resources, is recorded in MongoDB Atlas.
-
-Discord alerts are reserved for security problems and automatic remediation events. This keeps the audit trail comprehensive without flooding the notification channel with routine success messages.
-
-### 3\. Resilient Execution
-
-Failures in remediation, database writes, or Discord webhook delivery are caught and reported without unnecessarily stopping the processing of remaining resources.
-
-This allows the scanner to continue working through other resources when an individual operation fails.
-
-### 4\. S3 Default Encryption Nuance
-
-AWS enables server-side encryption with S3-managed keys (SSE-S3) by default for new S3 buckets. However, some compliance standards require server-side encryption with AWS KMS keys, potentially including customer-managed keys.
-
-CloudGuard's encryption rule is designed to identify buckets that do not meet the configured KMS encryption requirement rather than treating default SSE-S3 encryption as sufficient.
-
-The precise compliance requirement depends on the applicable policy. If customer-managed keys are mandatory, the scanner should validate the KMS key configuration rather than simply checking for the `aws:kms` encryption algorithm.
-
-### 5\. Terraform Drift
-
-CloudGuard actively modifies resources managed by Terraform, which can cause `terraform plan` to report drift after a scan.
-
-For this test environment, `terraform apply` can restore the configured resources.
-
-Potential production approaches include:
-
-- Using Terraform lifecycle settings such as `ignore_changes` for carefully selected remediated attributes.
-- Having the scanner open a pull request with the proposed infrastructure change instead of directly modifying resources.
-- Integrating remediation with an approved infrastructure-as-code workflow.
-
-Any drift-management strategy should be designed carefully to avoid concealing unintended infrastructure changes.
-
-### 6\. Pointing CloudGuard at Real AWS
-
-To run CloudGuard against a real AWS account:
-
-1. Remove the LocalStack-specific endpoint configuration from the Terraform provider.
-2. Remove LocalStack-specific `skip_*` settings where applicable.
-3. Remove `endpoint_url` arguments from the scanner's AWS client configuration.
-4. Configure real AWS credentials through environment variables, an AWS profile, or an appropriate IAM role.
-5. Review the detection and remediation rules against your organization's security policies.
-6. Run the scanner with least-privilege permissions and validate its behavior in a non-production environment first.
-
-**Note:** Automatic remediation can change production resources. Test thoroughly and establish appropriate permissions, monitoring, and approval controls before enabling production remediation.
-
-### 7\. MongoDB Atlas Network Access
-
-The original test setup allows MongoDB Atlas connections from any IP address because home and CI runner addresses may change frequently.
-
-This configuration increases exposure and should not be used as a production default.
-
-For improved security:
-
-- Restrict Atlas network access to known IP addresses or approved network paths.
-- Use private connectivity where appropriate.
-- Store database credentials in a secrets manager or CI secret store.
-- Apply least-privilege database access.
-- Rotate credentials regularly.
-
-Database credentials should not be treated as the only security boundary.
+- Remediation errors
+- Database write failures
+- Discord notification outages
 
 ---
 
-## CI/CD (GitHub Actions)
+##  CI/CD
 
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `ci.yml` | Every push and pull request | Installs dev dependencies, runs unit tests |
-| `scan.yml` | Daily at 03:00 UTC, or manually | Runs unit tests, then starts LocalStack, applies Terraform, runs the scanner |
+CloudGuard uses GitHub Actions for continuous integration and scheduled security scanning.
 
-The scan job only runs if the tests pass. It needs three repository secrets:
-`MONGODB_URI`, `DISCORD_WEBHOOK_URL`, `LOCALSTACK_AUTH_TOKEN`.
-Incidents are tagged `source: ci` or `source: local` so they can be told apart.
+| Workflow | Trigger |
+|---|---|
+| `ci.yml` | Every push and pull request |
+| `scan.yml` | Daily at 03:00 UTC or manual trigger |
 
-Dependencies are split: `requirements.txt` (runtime), `requirements-dev.txt`
-(tests), `requirements-local.txt` (local tooling, never installed in CI).
+### Workflow Details
+
+- The scan job runs only if tests pass.
+- Repository secrets are used for external service credentials.
+- Incidents are tagged with their source: `ci` or `local`.
+
+### Required GitHub Repository Secrets
+
+- `MONGODB_URI`
+- `DISCORD_WEBHOOK_URL`
+- `LOCALSTACK_AUTH_TOKEN`
 
 ---
 
-## Future Improvements
+##  Design Decisions
 
-The following features are planned:
+#### Dependency Injection
 
-- **GitHub Actions CI:** Run automated tests on pushes and pull requests.
-- **Scheduled Scans:** Execute CloudGuard periodically through GitHub Actions.
-- **React Dashboard:** Visualize scan history, findings, severity levels, and remediation status.
-- **Vercel Deployment:** Host the dashboard.
-- **Enhanced Remediation Workflows:** Add approval-based remediation and pull-request-based infrastructure fixes.
-- **Expanded Detection Coverage:** Add more AWS security and cost governance rules.
+Functions receive their AWS and database clients, making them testable with moto.
 
+#### Log Everything, Alert Selectively
 
-## Scope and Production Considerations
+Compliant results are stored to maintain a complete audit trail. Discord notifications are sent only for problems and automated fixes.
 
-CloudGuard is a portfolio project tested against LocalStack, a local AWS
-emulator. The design choices below are deliberate for that scope, and several
-would need to change in a real environment.
+#### Failures Never Crash a Scan
 
-**Test data is small.** The demo uses one bucket and one IAM role so each rule
-can be shown end to end. The scanners iterate over all resources, but the demo
-does not yet show a large, mixed estate.
+A failed remediation, database write, or notification is reported, and the scanner continues processing.
 
-**Repeated findings.** The scanner re-reports unresolved findings every run.
-Production tools alert on changes (new, resolved, worsened) rather than
-repeating known issues. Change-based alerting is planned.
+#### Only Expected Errors Mean Non-Compliant
 
-**Auto-remediation is simplified.** Changing a bucket's default encryption
-does not cause downtime and only affects new objects. The real risks are
-permissions (uploaders and readers need KMS access), key choice (a
-customer-managed key is usually required, and this project uses the default
-AWS-managed one), cost, and blast radius. A production version would add
-dry-run mode, exclusion tags, KMS pre-checks, a per-run change limit, human
-approval for production accounts, and a stored rollback record.
+An access error is not evidence of a misconfiguration. Such errors are logged and skipped rather than incorrectly classified.
 
-**Detection is deliberately narrow.** Three rules cover the core ideas.
-Production environments use services such as AWS Config or Security Hub for
-broad coverage, and a tool like this complements them.
+#### Least Privilege for the Dashboard
 
-**Remediation versus infrastructure as code.** Resources managed by Terraform
-drift when the scanner changes them. Production options are
-`lifecycle { ignore_changes }` on remediated attributes, or opening a pull
-request instead of changing resources directly.
+The API uses a read-only database user. Database errors return a generic HTTP 503 response, while detailed errors are recorded in server logs.
 
+#### Polling, Not Events
 
-**CloudGuard — Detect misconfigurations. Automate safe fixes. Maintain an auditable cloud security posture.**
+Scheduled scanning provides a verifiable approach using free tooling. CloudTrail and EventBridge are the planned path toward real-time monitoring.
+
+#### S3 Default Encryption
+
+AWS now encrypts new S3 buckets with SSE-S3 by default. CloudGuard identifies buckets using AWS-managed encryption keys when KMS is the configured standard.
+
+---
+
+##  Future Work
+
+- [ ] Change-based alerting with first-seen and last-seen tracking.
+- [ ] Dry-run mode for remediation.
+- [ ] Exclusion tags.
+- [ ] KMS pre-checks.
+- [ ] Public-access-block remediation.
+- [ ] IAM MFA checks.
+- [ ] IAM access-key age checks.
+- [ ] Event-driven detection using CloudTrail and EventBridge.
+
+---

@@ -1,35 +1,6 @@
 # Product Requirements Document
 ## CloudGuard: Cloud Security & Cost Governance Scanner
 
-**Author:** Gowtham
-**Status:** Draft — In Development
-**Last Updated:** September 2026
-**Build philosophy:** 100% free
-
----
-
-## 0. Cost & Access Verification (read this first)
-
-Every tool below was checked specifically for "free with no card required." This table is the source of truth for what you're actually signing up for — verify current terms yourself at signup, since pricing pages do change.
-
-| Tool | Role in project | Cost | Card required? |
-|---|---|---|---|
-| **LocalStack (Hobby plan)** | Local AWS emulator — Lambda, S3, DynamoDB, IAM, SNS, SQS, STS, Secrets Manager, CloudWatch Logs | Free (non-commercial use) | **No** — free account signup only |
-| **Terraform (CLI)** | Infrastructure as Code | Free, open-source | No — just a downloaded binary |
-| **Docker Desktop / Docker Engine** | Runs LocalStack locally | Free | No |
-| **GitHub Actions** | CI/CD pipeline | Free for public repositories | No |
-| **Python 3 + boto3** | Lambda logic, AWS SDK | Free, open-source | No |
-| **pytest + moto + pytest-cov** | Test framework, in-memory AWS mocking, coverage reporting | Free, open-source | No |
-| **MongoDB Atlas (free M0 tier)** | Persistent incident log storage for the public dashboard | Free forever, 512MB | No |
-| **Vercel (Hobby plan)** | Hosts the React dashboard + serverless API | Free | No |
-| **Discord (webhook)** | Real-time alerts | Free, no limits relevant to this use case | No |
-| **GitHub (public repo)** | Version control, portfolio visibility | Free | No |
-
-**What's intentionally NOT in this stack:** a real AWS account (requires a card for identity verification even on the free plan), real DynamoDB (same reason), and Slack (works free too, but Discord is simpler for a solo project with no integration-count limits).
-
-**Known limitation, stated honestly:** LocalStack's free tier doesn't guarantee state persistence between container restarts, and full IAM policy *enforcement* (vs. just writing policies) is a paid feature. The architecture below is designed around these limits rather than fighting them — see Section 3.
-
----
 
 ## 1. Overview
 
@@ -46,7 +17,7 @@ CloudGuard is a scheduled, automated scanner that:
 - **Scans** cloud resources on a regular interval for known misconfiguration patterns
 - **Auto-remediates** safe, well-defined issues (e.g., re-encrypts an unencrypted S3 bucket)
 - **Flags** issues requiring human judgment via a Discord alert
-- **Enforces cost discipline** by scanning for untagged/idle resources and flagging or stopping non-production waste
+- **Enforces cost discipline** by scanning for untagged/idle resources and flagging non-production waste
 - **Logs everything** to a persistent, queryable audit trail (MongoDB Atlas) with a public dashboard for visibility
 
 ### 1.3 Why polling/scheduled scanning instead of real-time event triggers
@@ -55,7 +26,6 @@ The original design used AWS CloudTrail + EventBridge for instant, real-time det
 - A legitimate, widely-used real-world pattern in its own right (many company security tools poll rather than stream)
 - Easier to reason about and debug while you're still learning
 
-The README will document the **event-driven upgrade path** (CloudTrail + EventBridge) as a "Future Enhancement" — this is a great interview talking point ("I built the polling version first because it was verifiable on free tooling, and I designed the event-driven version as the natural next step") that shows engineering judgment, not a limitation you're hiding.
 
 ### 1.4 Goals
 | Goal | Success Metric |
@@ -65,7 +35,7 @@ The README will document the **event-driven upgrade path** (CloudTrail + EventBr
 | Cost governance | Scan identifies untagged/non-prod resources and flags or stops them |
 | Auditability | Every action (detected, remediated, or flagged) is logged with timestamp, resource, and outcome |
 | Visibility | A public dashboard shows incident history and estimated cost savings over time |
-| Zero cost, zero card | Entire build and running demo cost $0 with no payment method entered anywhere |
+| Zero cost, zero card | Entire build and running demo cost $0  |
 
 ### 1.5 Non-Goals (v1)
 - Multi-cloud support (AWS emulation only)
@@ -78,7 +48,7 @@ The README will document the **event-driven upgrade path** (CloudTrail + EventBr
 
 ## 2. Users & Use Cases
 
-**Primary user:** You, building this as a portfolio project. In interviews, you present it as: "I built and fully tested this against a local AWS emulation environment to avoid cloud costs while learning; the architecture is designed to deploy against real AWS with minimal changes."
+**Primary user:** You, building this as a portfolio project. 
 
 **Use cases:**
 1. Scanner runs → finds an S3 bucket without encryption → auto-applies default encryption → logs the fix → posts a Discord notification.
@@ -207,35 +177,15 @@ Since free-tier LocalStack may not persist state across restarts:
 | **6** | GitHub Actions automation | Pipeline that runs the scanner on a schedule (cron) in CI, using LocalStack-in-CI (LocalStack has an official GitHub Action for this); CI test job (pytest unit + integration) runs before the scan job |
 | **7** | Dashboard backend | Vercel serverless function reading from MongoDB Atlas, returning incident JSON; API tests for empty-state and malformed-data cases |
 | **8** | Dashboard frontend | React app on Vercel — incident timeline, auto-fixed vs. flagged counts, estimated savings total |
-| **9** | Documentation + polish | README with architecture diagram, demo GIF, design-decision write-up (why polling not events, why MongoDB not DynamoDB, why some issues auto-fix and others don't), test coverage report — and a clearly labeled "Future Enhancements" section covering the real-time CloudTrail+EventBridge upgrade path |
+| **9** | Documentation + polish | README with architecture diagram, design-decision, test coverage report  |
 
-*Buffer note: if you fall behind, weeks 7-8 (dashboard) are the most compressible — a working scanner with logged results in MongoDB (even viewed via a simple script rather than a polished dashboard) is still a strong, demonstrable project.*
 
----
 
-## 7. Success Criteria (definition of "done")
+## 7. Testing & QA Strategy
 
-- [ ] At least 4 detection rules working end-to-end against LocalStack (2+ auto-remediated, 2+ flagged)
-- [ ] All test infrastructure defined in Terraform, reproducible with `terraform apply`
-- [ ] GitHub Actions runs the scanner automatically on a schedule
-- [ ] Discord receives real alerts for flagged issues
-- [ ] MongoDB Atlas persistently stores incident history
-- [ ] Public dashboard (Vercel) displays real incident data
-- [ ] README documents architecture, setup, design rationale, and the honest scope/limitations (local emulation vs. real AWS)
-- [ ] You can verbally explain, unprompted: why polling instead of events, why MongoDB instead of DynamoDB, what would change to deploy this against real AWS, and what happens on failure (script crashes mid-remediation, MongoDB write fails, etc.)
-- [ ] Unit tests exist for all 4+ detection/remediation rules, including negative (no false-positive) cases
-- [ ] At least one integration test runs the scanner end-to-end against LocalStack in CI
-- [ ] At least one test covers a failure mode (DB write failure or remediation exception) without crashing the scan
-- [ ] API layer has tests for empty-state and malformed-data cases
-- [ ] CI fails the pipeline if tests fail — scanning doesn't run on broken code
+Why this section exists: To explaining failure handling ("script crashes mid-remediation, MongoDB write fails") is only a credible interview claim if it's backed by actual tests. This section makes it real — it's what turns "I built a scanner" into "I built and tested a scanner," the exact language a test-automation-focused JD is looking for.
 
----
-
-## 8. Testing & QA Strategy
-
-Why this section exists: Section 7's commitment to explaining failure handling ("script crashes mid-remediation, MongoDB write fails") is only a credible interview claim if it's backed by actual tests. This section makes it real — it's what turns "I built a scanner" into "I built and tested a scanner," the exact language a test-automation-focused JD is looking for.
-
-**Stack (all free, no new tools/cards):**
+**Stack:**
 
 | Layer | Framework | Why |
 |---|---|---|
@@ -245,7 +195,7 @@ Why this section exists: Section 7's commitment to explaining failure handling (
 | API layer (Vercel serverless) | pytest + requests | Hits the deployed/local endpoint, asserts on JSON shape and status codes |
 | CI enforcement | GitHub Actions | Test job runs on every push; scanner job only runs after tests pass |
 
-### 8.1 Unit tests — scanner rules (moto, no LocalStack needed)
+### 7.1 Unit tests — scanner rules (moto, no LocalStack needed)
 
 Test each detection/remediation rule from Section 4 in isolation, with mocked AWS state:
 
@@ -255,27 +205,27 @@ Test each detection/remediation rule from Section 4 in isolation, with mocked AW
 - Rule #5 (missing tag): mocked resource with no `Environment` tag → assert flagged/stopped per configured aggressiveness
 - Negative cases for every rule: a correctly-configured resource should produce zero findings — this catches false positives, which matter more than false negatives in a security tool
 
-### 8.2 Integration tests — against LocalStack
+### 7.2 Integration tests — against LocalStack
 
 A smaller set of tests that run the same scanner code against a live LocalStack container (via the LocalStack GitHub Action, same one used for the scheduled scan job):
 
 - End-to-end: create real (emulated) misconfigured resources via Terraform → run the actual scanner entrypoint → assert MongoDB received the expected incident record → assert Discord webhook was called with expected payload (mock the webhook call itself here — don't spam real Discord in CI)
 - Idempotency check: run the scanner twice against the same resource → assert the second run doesn't create a duplicate incident or re-apply remediation unnecessarily
 
-### 8.3 API tests — dashboard backend
+### 7.3 API tests — dashboard backend
 
 - Empty state: MongoDB has zero incidents → API returns 200 with an empty array, not an error
 - Malformed/partial document: insert a record missing an expected field → assert the API doesn't 500, either sanitizes or returns a clear error
 - Normal case: seeded incident data → assert response shape matches what the React dashboard expects (field names, types, pagination if used)
 
-### 8.4 Failure-mode tests
+### 7.4 Failure-mode tests
 
-Directly covers the Section 7 commitment to explain failure handling:
+Directly covers the commitment to explain failure handling:
 
 - Simulate a MongoDB write failure (e.g., bad connection string in test config) → assert the scanner logs the failure locally and doesn't crash the whole run — one bad write shouldn't lose all other incidents from that scan
 - Simulate a remediation call raising an exception mid-fix → assert it's caught, logged as a failed remediation (not silently swallowed), and doesn't block remaining resources from being scanned
 
-### 8.5 CI wiring
+### 7.5 CI wiring
 
 Add a test job in GitHub Actions that runs before the scheduled scan job:
 
@@ -292,7 +242,7 @@ Track coverage with `pytest-cov` — you don't need a high number, but "here's m
 
 
 
-## 9. Future Enhancements (post-v1, don't build now)
+## 8. Future Enhancements 
 - Real-time detection via CloudTrail + EventBridge (once you're comfortable spending on a real AWS account, or once budget allows)
 - Deploy against a real AWS free-tier account (still requires a card for AWS's identity verification, but $0 actual charges within limits) to get a genuinely live demo
 - Multi-cloud support (Azure via Azure for Students, which is confirmed card-free for eligible students)
