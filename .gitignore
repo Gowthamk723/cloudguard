@@ -4,9 +4,12 @@ __pycache__/
 .env
 .coverage
 
+
 .terraform/
 *.tfstate
 *.tfstate.backup
+*.tfstate.*
+*.tfstate.lock.info
 terraform.tfvars
 *.auto.tfvars
 
